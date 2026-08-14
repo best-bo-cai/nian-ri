@@ -27,3 +27,6 @@ prd.md
 # Keystore (do not commit signing keys)
 *.jks
 *.keystore
+
+# Data model diagrams (local only, not tracked)
+docs/
