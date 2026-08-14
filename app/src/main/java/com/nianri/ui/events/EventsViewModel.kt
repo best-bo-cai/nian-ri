@@ -1,11 +1,13 @@
 package com.nianri.ui.events
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.nianri.data.entity.EventEntity
 import com.nianri.data.repository.EventRepository
 import com.nianri.util.DateUtils
+import com.nianri.util.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +25,10 @@ data class EventItem(
     val daysInfo: String
 )
 
-class EventsViewModel(private val repository: EventRepository) : ViewModel() {
+class EventsViewModel(
+    private val repository: EventRepository,
+    private val appContext: Context
+) : ViewModel() {
 
     private val _events = MutableStateFlow<List<EventItem>>(emptyList())
     val events: StateFlow<List<EventItem>> = _events.asStateFlow()
@@ -45,6 +50,7 @@ class EventsViewModel(private val repository: EventRepository) : ViewModel() {
                     val endDate = event.endDate?.let { DateUtils.getStartOfDay(it) }
 
                     val (status, daysInfo) = when {
+                        event.completed -> EventStatus.ENDED to "已完成"
                         endDate != null && now > endDate -> {
                             val daysSinceEnd = DateUtils.daysBetween(endDate, now)
                             EventStatus.ENDED to "已结束 $daysSinceEnd 天"
@@ -81,6 +87,13 @@ class EventsViewModel(private val repository: EventRepository) : ViewModel() {
         viewModelScope.launch {
             val event = repository.getEventById(eventId) ?: return@launch
             repository.updateEvent(event.copy(completed = completed))
+
+            // 勾选完成则取消提醒；取消勾选且仍开启提醒则重新调度
+            if (completed) {
+                NotificationHelper.cancelNotification(appContext, eventId)
+            } else if (event.reminderEnabled) {
+                NotificationHelper.scheduleNotification(appContext, event.copy(completed = false))
+            }
         }
     }
 
@@ -90,10 +103,13 @@ class EventsViewModel(private val repository: EventRepository) : ViewModel() {
         }
     }
 
-    class Factory(private val repository: EventRepository) : ViewModelProvider.Factory {
+    class Factory(
+        private val repository: EventRepository,
+        private val appContext: Context
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return EventsViewModel(repository) as T
+            return EventsViewModel(repository, appContext) as T
         }
     }
 }

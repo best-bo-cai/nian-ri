@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -47,10 +48,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.nianri.NianRiApp
 import com.nianri.data.entity.EventEntity
 import com.nianri.util.DateUtils
+import com.nianri.util.NotificationHelper
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -73,7 +76,10 @@ fun EditEventScreen(
     var repeatRule by remember { mutableStateOf("none") }
     var reminderEnabled by remember { mutableStateOf(false) }
     var reminderMethods by remember { mutableStateOf("local") }
-    var reminderTimes by remember { mutableStateOf("day_before_1") }
+    // 提醒时间点：三级下拉框（提前/当天 + 数字 + 天/时）
+    var reminderMode by remember { mutableStateOf("before") }
+    var reminderAmount by remember { mutableStateOf("1") }
+    var reminderUnit by remember { mutableStateOf("day") }
     var notes by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var isNewEvent by remember { mutableStateOf(true) }
@@ -91,7 +97,12 @@ fun EditEventScreen(
                 repeatRule = event.repeatRule
                 reminderEnabled = event.reminderEnabled
                 reminderMethods = event.reminderMethods
-                reminderTimes = event.reminderTimes
+                // 从 "mode:amount:unit" 格式解析回三个状态
+                parseReminderTime(event.reminderTimes).let { (mode, amount, unit) ->
+                    reminderMode = mode
+                    reminderAmount = amount
+                    reminderUnit = unit
+                }
                 notes = event.notes
                 email = event.email
                 isNewEvent = false
@@ -244,28 +255,48 @@ fun EditEventScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
-                        val timeOptions = listOf(
-                            "day_before_1" to "提前1天",
-                            "day_before_3" to "提前3天",
-                            "day_at_9" to "当天9点",
-                            "day_at_10" to "当天10点"
-                        )
-                        timeOptions.forEach { (value, label) ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = reminderTimes.contains(value),
-                                    onCheckedChange = { checked ->
-                                        val times = reminderTimes.split(",").toMutableList()
-                                        if (checked) {
-                                            if (value !in times) times.add(value)
-                                        } else {
-                                            times.remove(value)
-                                        }
-                                        reminderTimes = times.joinToString(",")
-                                    }
+
+                        // 三级下拉框：提前/当天 + 数字 + 天/时
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // 第一级：提前 / 当天
+                            DropdownSelector(
+                                label = "方式",
+                                value = reminderMode,
+                                options = listOf("before" to "提前", "at" to "当天"),
+                                onValueChange = { reminderMode = it },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // 第二级：数字（填写）
+                            OutlinedTextField(
+                                value = reminderAmount,
+                                onValueChange = { input ->
+                                    // 仅允许数字
+                                    reminderAmount = input.filter { it.isDigit() }
+                                },
+                                label = { Text("数值") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
                                 )
-                                Text(label, style = MaterialTheme.typography.bodyMedium)
-                            }
+                            )
+
+                            // 第三级：天 / 时
+                            DropdownSelector(
+                                label = "单位",
+                                value = reminderUnit,
+                                options = listOf("day" to "天", "hour" to "时"),
+                                onValueChange = { reminderUnit = it },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
 
                         if (reminderMethods.contains("email")) {
@@ -310,14 +341,23 @@ fun EditEventScreen(
                             repeatRule = repeatRule,
                             reminderEnabled = reminderEnabled,
                             reminderMethods = reminderMethods,
-                            reminderTimes = reminderTimes,
+                            reminderTimes = "$reminderMode:$reminderAmount:$reminderUnit",
                             email = email,
                             notes = notes
                         )
-                        if (isNewEvent) {
+                        val savedId = if (isNewEvent) {
                             repository.insertEvent(event)
                         } else {
                             repository.updateEvent(event)
+                            eventId
+                        }
+
+                        // 保存后根据提醒设置调度或取消通知
+                        val savedEvent = event.copy(id = savedId ?: event.id)
+                        if (savedEvent.reminderEnabled) {
+                            NotificationHelper.scheduleNotification(context, savedEvent)
+                        } else {
+                            NotificationHelper.cancelNotification(context, savedEvent.id)
                         }
                         onNavigateBack()
                     }
@@ -349,13 +389,15 @@ fun DropdownSelector(
     label: String,
     value: String,
     options: List<Pair<String, String>>,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { expanded = it }
+        onExpandedChange = { expanded = it },
+        modifier = modifier
     ) {
         OutlinedTextField(
             value = options.find { it.first == value }?.second ?: value,
@@ -388,6 +430,21 @@ fun DropdownSelector(
             }
         }
     }
+}
+
+/**
+ * 解析提醒时间格式 "mode:amount:unit"，返回三元组 (mode, amount, unit)。
+ * 无法解析时回退到默认值 ("before", "1", "day")。
+ */
+private fun parseReminderTime(reminderTime: String): Triple<String, String, String> {
+    val parts = reminderTime.split(":")
+    if (parts.size == 3) {
+        val mode = if (parts[0] == "at") "at" else "before"
+        val amount = parts[1].ifBlank { "1" }
+        val unit = if (parts[2] == "hour") "hour" else "day"
+        return Triple(mode, amount, unit)
+    }
+    return Triple("before", "1", "day")
 }
 
 @Composable

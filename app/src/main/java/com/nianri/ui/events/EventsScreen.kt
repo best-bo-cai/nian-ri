@@ -62,7 +62,8 @@ fun EventsScreen(
     onNavigateToEdit: (Long) -> Unit,
     viewModel: EventsViewModel = viewModel(
         factory = EventsViewModel.Factory(
-            (LocalContext.current.applicationContext as NianRiApp).repository
+            (LocalContext.current.applicationContext as NianRiApp).repository,
+            LocalContext.current.applicationContext
         )
     )
 ) {

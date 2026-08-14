@@ -87,10 +87,6 @@
     <string name="developer_info">开发者信息</string>
     <string name="calendar">日历</string>
     <string name="upcoming_days">即将到来的日子</string>
-    <string name="day_before_1">提前1天</string>
-    <string name="day_before_3">提前3天</string>
-    <string name="day_at_9">当天9点</string>
-    <string name="day_at_10">当天10点</string>
     <string name="local_notification">本地通知</string>
     <string name="email_notification">邮件通知</string>
     <string name="default_holiday_next">下一个法定节假日</string>

@@ -108,7 +108,7 @@ class EventRepository(
                 repeatRule = "yearly",
                 reminderEnabled = true,
                 reminderMethods = "local",
-                reminderTimes = "day_before_1,day_before_3",
+                reminderTimes = "before:1:day",
                 isDefault = true
             )
         )
@@ -128,7 +128,7 @@ class EventRepository(
                 repeatRule = "yearly",
                 reminderEnabled = true,
                 reminderMethods = "local",
-                reminderTimes = "day_before_1",
+                reminderTimes = "before:1:day",
                 isDefault = true
             )
         )
@@ -148,7 +148,7 @@ class EventRepository(
                 repeatRule = "yearly",
                 reminderEnabled = true,
                 reminderMethods = "local",
-                reminderTimes = "day_before_1",
+                reminderTimes = "before:1:day",
                 isDefault = true
             )
         )

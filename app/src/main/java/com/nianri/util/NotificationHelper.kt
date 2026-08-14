@@ -10,6 +10,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.nianri.R
 import com.nianri.data.entity.EventEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -36,8 +40,17 @@ class AlarmReceiver : BroadcastReceiver() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            // Re-schedule all alarms after boot
-            // This would need to query the database and re-schedule
+            // 设备重启后重新调度所有开启提醒的事件
+            val app = context.applicationContext as? com.nianri.NianRiApp ?: return
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching {
+                    app.repository.getAllEvents().first()
+                        .filter { it.reminderEnabled && !it.completed }
+                        .forEach { event ->
+                            NotificationHelper.scheduleNotification(context, event)
+                        }
+                }
+            }
         }
     }
 }
@@ -48,57 +61,63 @@ object NotificationHelper {
         if (!event.reminderEnabled) return
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val times = event.reminderTimes.split(",").filter { it.isNotEmpty() }
+        val triggerTime = calculateTriggerTime(event.date, event.reminderTimes)
+        if (triggerTime <= System.currentTimeMillis()) return
 
-        for (timeStr in times) {
-            val triggerTime = calculateTriggerTime(event.date, timeStr)
-            if (triggerTime <= System.currentTimeMillis()) continue
+        val intent = Intent(context, AlarmReceiver::class.java).apply {
+            putExtra("event_name", event.name)
+            putExtra("event_id", event.id)
+        }
 
-            val intent = Intent(context, AlarmReceiver::class.java).apply {
-                putExtra("event_name", event.name)
-                putExtra("event_id", event.id)
-            }
+        val requestCode = (event.id * 10).toInt()
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
-            val requestCode = (event.id * 10 + times.indexOf(timeStr)).toInt()
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerTime,
-                        pendingIntent
-                    )
-                }
-            } else {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (alarmManager.canScheduleExactAlarms()) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
                     pendingIntent
                 )
             }
+        } else {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerTime,
+                pendingIntent
+            )
         }
     }
 
     fun cancelNotification(context: Context, eventId: Long) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        for (i in 0..3) {
-            val intent = Intent(context, AlarmReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                (eventId * 10 + i).toInt(),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            alarmManager.cancel(pendingIntent)
-        }
+        val intent = Intent(context, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            (eventId * 10).toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
     }
 
+    /**
+     * 根据提醒时间格式 "mode:amount:unit" 计算触发时间戳。
+     * - mode: "before"(提前) / "at"(当天)
+     * - amount: 数字
+     * - unit: "day"(天) / "hour"(时)
+     *
+     * 语义：
+     * - before:N:day  -> 事件日期当天 9 点往前推 N 天
+     * - before:N:hour -> 事件日期当天 9 点往前推 N 小时
+     * - at:N:hour     -> 事件日期当天 N 点
+     * - at:N:day      -> 事件日期当天 9 点（当天配"天"无意义，回退默认 9 点）
+     */
     private fun calculateTriggerTime(eventDate: Long, timeStr: String): Long {
         val cal = Calendar.getInstance()
         cal.timeInMillis = eventDate
@@ -107,23 +126,27 @@ object NotificationHelper {
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
 
-        return when (timeStr) {
-            "day_before_1" -> {
-                cal.add(Calendar.DAY_OF_YEAR, -1)
+        val parts = timeStr.split(":")
+        if (parts.size != 3) return cal.timeInMillis
+
+        val mode = parts[0]
+        val amount = parts[1].toIntOrNull() ?: 1
+        val unit = parts[2]
+
+        return when {
+            mode == "before" && unit == "day" -> {
+                cal.add(Calendar.DAY_OF_YEAR, -amount)
                 cal.timeInMillis
             }
-            "day_before_3" -> {
-                cal.add(Calendar.DAY_OF_YEAR, -3)
+            mode == "before" && unit == "hour" -> {
+                cal.add(Calendar.HOUR_OF_DAY, -amount)
                 cal.timeInMillis
             }
-            "day_at_9" -> {
-                cal.set(Calendar.HOUR_OF_DAY, 9)
+            mode == "at" && unit == "hour" -> {
+                cal.set(Calendar.HOUR_OF_DAY, amount)
                 cal.timeInMillis
             }
-            "day_at_10" -> {
-                cal.set(Calendar.HOUR_OF_DAY, 10)
-                cal.timeInMillis
-            }
+            // at + day（无意义）或未知格式，回退到当天 9 点
             else -> cal.timeInMillis
         }
     }
