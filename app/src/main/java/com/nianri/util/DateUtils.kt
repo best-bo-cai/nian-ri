@@ -42,24 +42,57 @@ object DateUtils {
 
         return when (repeatRule) {
             "yearly" -> {
-                val nextCal = Calendar.getInstance()
-                nextCal.timeInMillis = timestamp
-                nextCal.set(Calendar.YEAR, now.get(Calendar.YEAR))
-                if (nextCal.timeInMillis < now.timeInMillis) {
-                    nextCal.add(Calendar.YEAR, 1)
+                val originalMonth = cal.get(Calendar.MONTH)
+                val originalDay = cal.get(Calendar.DAY_OF_MONTH)
+                var year = now.get(Calendar.YEAR)
+                // 构造候选日期，day 先钳制到该年该月的实际最大天数，避免 2 月 29 日溢出
+                val maxDay = getMaxDayOfMonth(year, originalMonth)
+                val candidateDay = minOf(originalDay, maxDay)
+                val candidate = Calendar.getInstance().apply {
+                    clear()
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, originalMonth)
+                    set(Calendar.DAY_OF_MONTH, candidateDay)
                 }
-                nextCal.timeInMillis
+                if (candidate.timeInMillis < now.timeInMillis) {
+                    year += 1
+                    val nextMaxDay = getMaxDayOfMonth(year, originalMonth)
+                    return Calendar.getInstance().apply {
+                        clear()
+                        set(Calendar.YEAR, year)
+                        set(Calendar.MONTH, originalMonth)
+                        set(Calendar.DAY_OF_MONTH, minOf(originalDay, nextMaxDay))
+                    }.timeInMillis
+                }
+                candidate.timeInMillis
             }
             "monthly" -> {
-                val nextCal = Calendar.getInstance()
-                nextCal.timeInMillis = timestamp
-                nextCal.set(Calendar.YEAR, now.get(Calendar.YEAR))
-                nextCal.set(Calendar.MONTH, now.get(Calendar.MONTH))
-                nextCal.set(Calendar.DAY_OF_MONTH, cal.get(Calendar.DAY_OF_MONTH))
-                if (nextCal.timeInMillis < now.timeInMillis) {
-                    nextCal.add(Calendar.MONTH, 1)
+                val originalDay = cal.get(Calendar.DAY_OF_MONTH)
+                var year = now.get(Calendar.YEAR)
+                var month = now.get(Calendar.MONTH)
+                val maxDay = getMaxDayOfMonth(year, month)
+                val candidateDay = minOf(originalDay, maxDay)
+                val candidate = Calendar.getInstance().apply {
+                    clear()
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, candidateDay)
                 }
-                nextCal.timeInMillis
+                if (candidate.timeInMillis < now.timeInMillis) {
+                    month += 1
+                    if (month > 11) {
+                        month = 0
+                        year += 1
+                    }
+                    val nextMaxDay = getMaxDayOfMonth(year, month)
+                    return Calendar.getInstance().apply {
+                        clear()
+                        set(Calendar.YEAR, year)
+                        set(Calendar.MONTH, month)
+                        set(Calendar.DAY_OF_MONTH, minOf(originalDay, nextMaxDay))
+                    }.timeInMillis
+                }
+                candidate.timeInMillis
             }
             "weekly" -> {
                 val nextCal = Calendar.getInstance()
@@ -75,6 +108,15 @@ object DateUtils {
             }
             else -> timestamp
         }
+    }
+
+    private fun getMaxDayOfMonth(year: Int, month: Int): Int {
+        return Calendar.getInstance().apply {
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.getActualMaximum(Calendar.DAY_OF_MONTH)
     }
 
     fun daysBetween(startTimestamp: Long, endTimestamp: Long): Int {
