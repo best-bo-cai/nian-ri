@@ -14,6 +14,7 @@
     <application
         android:name=".NianRiApp"
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:label="念日"
         android:supportsRtl="true"
