@@ -19,13 +19,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nianri.NianRiApp
+import com.nianri.data.ModelListFetcher
 import com.nianri.data.entity.AiConfigEntity
 import kotlinx.coroutines.launch
 
@@ -263,6 +267,30 @@ fun AiConfigEditDialog(
     var expanded by remember { mutableStateOf(false) }
     val providerOptions = listOf("openai" to "OpenAI 兼容", "anthropic" to "Anthropic 兼容")
 
+    // 模型列表拉取状态
+    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isFetchingModels by remember { mutableStateOf(false) }
+    var modelFetchError by remember { mutableStateOf<String?>(null) }
+    var modelsExpanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun fetchModelList() {
+        if (baseUrl.isBlank()) {
+            modelFetchError = "请先填写 Base URL"
+            return
+        }
+        if (isFetchingModels) return
+        isFetchingModels = true
+        modelFetchError = null
+        scope.launch {
+            val result = ModelListFetcher.fetchModels(baseUrl, provider, apiKey)
+            isFetchingModels = false
+            result
+                .onSuccess { models = it }
+                .onFailure { modelFetchError = "获取模型失败：${it.message}" }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (config.id == 0) "添加 AI 配置" else "编辑 AI 配置") },
@@ -306,6 +334,9 @@ fun AiConfigEditDialog(
                                 onClick = {
                                     provider = value
                                     expanded = false
+                                    // 切换协议后旧模型列表不再适用
+                                    models = emptyList()
+                                    modelFetchError = null
                                 }
                             )
                         }
@@ -315,7 +346,12 @@ fun AiConfigEditDialog(
 
                 OutlinedTextField(
                     value = baseUrl,
-                    onValueChange = { baseUrl = it },
+                    onValueChange = {
+                        baseUrl = it
+                        // 地址变更后旧模型列表不再适用
+                        models = emptyList()
+                        modelFetchError = null
+                    },
                     label = { Text("Base URL") },
                     placeholder = {
                         Text(
@@ -337,19 +373,74 @@ fun AiConfigEditDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("Model") },
-                    placeholder = {
-                        Text(
-                            if (provider == "anthropic") "claude-sonnet-4-20250514"
-                            else "gpt-4o"
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                Box {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text("Model") },
+                        placeholder = {
+                            Text(
+                                if (provider == "anthropic") "claude-sonnet-4-20250514"
+                                else "gpt-4o"
+                            )
+                        },
+                        isError = modelFetchError != null,
+                        supportingText = modelFetchError?.let { error ->
+                            {
+                                Text(
+                                    error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isFetchingModels) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Refresh,
+                                        contentDescription = "获取模型列表",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clickable { fetchModelList() }
+                                    )
+                                }
+                                if (models.isNotEmpty()) {
+                                    Icon(
+                                        Icons.Filled.ArrowDropDown,
+                                        contentDescription = "选择模型",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clickable { modelsExpanded = true }
+                                    )
+                                }
+                            }
+                        }
+                    )
+                    DropdownMenu(
+                        expanded = modelsExpanded,
+                        onDismissRequest = { modelsExpanded = false }
+                    ) {
+                        models.forEach { modelName ->
+                            DropdownMenuItem(
+                                text = { Text(modelName) },
+                                onClick = {
+                                    model = modelName
+                                    modelsExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
