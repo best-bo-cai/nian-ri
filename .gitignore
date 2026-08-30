@@ -27,6 +27,8 @@ prd.md
 # Keystore (do not commit signing keys)
 *.jks
 *.keystore
+# 例外：项目固定的 CI 签名证书（个人项目，用于保证构建签名一致支持覆盖安装）
+!app/keystore/nianri.keystore
 
 # Data model diagrams (local only, not tracked)
 docs/
