@@ -12,10 +12,11 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            // 固定签名证书：本地与 CI 构建签名一致，支持覆盖安装
+            storeFile = file("keystore/nianri.keystore")
+            storePassword = "nianri2026"
+            keyAlias = "nianri"
+            keyPassword = "nianri2026"
         }
     }
 
