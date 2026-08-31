@@ -17,6 +17,7 @@ app/build/
 # Local configuration (contains machine-specific SDK path)
 local.properties
 prd.md
+CONTEXT.md
 
 # OS
 .DS_Store
